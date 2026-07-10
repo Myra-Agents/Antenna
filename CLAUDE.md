@@ -11,11 +11,20 @@ bun-compiled to a standalone binary, embedded in the Rust worker via
   `ChatOpenAI` points `baseURL` at **the hub** (`${MYRA_HUB_URL}/v1`), never
   OpenRouter directly. `FilesystemBackend` rootDir = the task cwd (worktree
   isolation off by default — usecases aren't always git repos).
-- `src/protocol.ts` — the worker↔harness wire types. stdin = one JSON `TaskInput`
-  line; stdout = JSON-lines `HarnessEvent`s. **stderr is raw diagnostics only** —
-  never write structured events there.
-- `src/index.ts` — CLI. `smoke` = no-network graph compile; default = read task,
-  `streamEvents({version:"v2"})`, map LangGraph events → harness events.
+- `src/protocol.ts` — the worker↔harness wire contract, a **vendored copy** of
+  `@myra/shared/src/harness.ts` (`HarnessEvent`/`HarnessControl` + the
+  `{runId,cardId,seq}` envelope) plus the deepagents→Myra tool-name rename map.
+  Keep it byte-compatible with shared.
+- `src/sink.ts` — where events go. `WsSink` dials the worker over a **loopback
+  WebSocket** (`MYRA_WORKER_EVENT_URL`, `Authorization: Bearer <run-token>` via
+  Bun's header extension), stamps the envelope + monotonic `seq`, and carries an
+  inbound control channel (cancel). `StdoutSink` (JSON-lines) is the fallback
+  when no worker URL is set — for isolated testing. **stderr is raw diagnostics
+  only** — never structured events.
+- `src/index.ts` — CLI. `smoke` = no-network graph compile; default = read the
+  prompt from `argv[2]`, `streamEvents({version:"v2", signal})`, map LangGraph
+  events → `HarnessEvent`s (buffered text, renamed tools, `write_todos`→`todos`
+  widget), emit a terminal `result`. Cancel aborts the stream.
 
 ## Where the LLM logic lives
 
@@ -38,5 +47,6 @@ bun-compiled to a standalone binary, embedded in the Rust worker via
 ```sh
 bun install
 bun run typecheck
-bun run smoke        # expects a `final` event: "graph ok: ..."
+bun run smoke        # expects a `smoke` event with the compiled graph nodes
+bun run compile      # bun --compile → dist/myra-harness (single binary, ~62MB)
 ```
