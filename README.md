@@ -10,44 +10,59 @@ holds the shared OpenRouter key, runs the model fallback cascade, and enforces
 per-user quota. The harness knows only one URL.
 
 ```
-worker ──spawn──► myra-harness ──HTTP /v1/chat/completions──► hub ──► OpenRouter
-        stdin: {prompt,cwd,runId}     stdout: JSON-lines events
+                    prompt (argv)                    Authorization: Bearer <token>
+worker ──spawn──► myra-harness ──────► hub ──► OpenRouter
+   ▲  loopback WebSocket (/agent-events) │
+   └──────── HarnessEvent (up) ──────────┘
+            HarnessControl (down: cancel/resume/approve)
 ```
+
+The worker mints a per-run token, spawns the binary with the prompt as `argv[2]`
+and the env below, and the harness dials back over a loopback WebSocket. Events
+flow up (persisted + re-emitted by the worker); controls flow down.
 
 ## Protocol
 
-**Input** (stdin, one JSON line):
+The wire contract is a vendored copy of `@myra/shared`'s `harness.ts` — see
+[`src/protocol.ts`](src/protocol.ts). Every event carries a `{runId, cardId,
+seq}` envelope (`seq` = monotonic per run, for catch-up on reconnect).
 
-```json
-{ "prompt": "List files then write a haiku", "cwd": "/work", "runId": "r_123" }
-```
+**harness → worker** (`HarnessEvent`):
 
-**Output** (stdout, JSON-lines) — see [`src/protocol.ts`](src/protocol.ts):
+| `type`        | payload                                            |
+|---------------|----------------------------------------------------|
+| `text`        | `{text}` — assistant prose (buffered per turn)     |
+| `thinking`    | `{text}` — reasoning                               |
+| `tool_use`    | `{id, name, input}` — name renamed to Myra's keys  |
+| `tool_result` | `{toolUseId, content, isError}`                    |
+| `todos`       | `{todos[]}` — `write_todos` → checklist widget     |
+| `result`      | `{status, summary?, question?, error?, tokens?, cost?}` |
 
-| `type`        | payload                          |
-|---------------|----------------------------------|
-| `ready`       | `{version, runId?}`              |
-| `token`       | `{text}` — streamed assistant text |
-| `tool_call`   | `{id, name, args}`               |
-| `tool_result` | `{id, name, result}`             |
-| `final`       | `{content}`                      |
-| `error`       | `{message}`                      |
+**worker → harness** (`HarnessControl`): `cancel` (wired), `resume` / `approve`
+(reserved for async-feedback + safety-gate).
+
+The harness embedded here **does not** write `agent-results/{cardId}.json` — the
+worker applies the card transition straight from the `result` event.
 
 ## Env
 
-| var              | meaning                                             |
-|------------------|-----------------------------------------------------|
-| `MYRA_HUB_URL`   | hub base URL; requests go to `${MYRA_HUB_URL}/v1`   |
-| `MYRA_CREDENTIAL`| Myra instance credential (sent as the OpenAI apiKey)|
-| `MYRA_MODEL`     | optional model hint (hub cascade may override)      |
+| var                    | meaning                                                    |
+|------------------------|------------------------------------------------------------|
+| `MYRA_WORKER_EVENT_URL`| worker WS URL, e.g. `ws://127.0.0.1:4319/agent-events`. Absent → stdout JSON-lines fallback |
+| `MYRA_RUN_TOKEN`       | per-run bearer token for the WS handshake                  |
+| `MYRA_RUN_ID`          | run id, stamped on the envelope                            |
+| `MYRA_CARD_ID`         | card id, stamped on the envelope                           |
+| `MYRA_HUB_URL`         | hub base URL; requests go to `${MYRA_HUB_URL}/v1`          |
+| `MYRA_CREDENTIAL`      | Myra instance credential (sent as the OpenAI apiKey)       |
+| `MYRA_MODEL`           | optional model hint (hub cascade may override)             |
 
 ## Develop
 
 ```sh
 bun install
 bun run smoke                       # no network: compile graph, print nodes
-echo '{"prompt":"hi"}' | MYRA_HUB_URL=http://localhost:8787 \
-  MYRA_CREDENTIAL=... bun run dev   # real run against a local hub
+# real run against a local hub, stdout fallback (no worker):
+MYRA_HUB_URL=http://localhost:8787 MYRA_CREDENTIAL=... bun run dev "list files then write a haiku"
 bun run typecheck
 ```
 
