@@ -2,7 +2,11 @@ import { buildAgent } from "./agent"
 import { isTodoTool, renameTool, type HarnessResultStatus, type HarnessTodo } from "./protocol"
 import { makeSink, type Sink } from "./sink"
 
-const VERSION = "0.2.0"
+// Descriptive build version injected by `scripts/compile.mjs` at compile time
+// (package version + git sha when off a `v*` tag + `-dirty`). Undefined in a
+// plain `bun run dev`/`smoke` — fall back to the bare package version.
+declare const MYRA_HARNESS_BUILD_VERSION: string | undefined
+const VERSION = typeof MYRA_HARNESS_BUILD_VERSION !== "undefined" ? MYRA_HARNESS_BUILD_VERSION : "0.2.0"
 
 /** Coerce LangChain message content (string | parts[]) to plain text. */
 function contentToText(content: unknown): string {
