@@ -26,7 +26,12 @@ export function buildAgent(opts: { cwd: string; model?: string }) {
       streaming: true,
       configuration: { baseURL: `${hubUrl}/v1` },
     }),
+    // Jail the agent to the card's working directory: `virtualMode` treats the
+    // cwd as the virtual root `/`, so the agent sees ONLY this folder (and can't
+    // escape via absolute paths or `..`/`~`). Without it deepagents' default
+    // passes absolute paths straight to the real filesystem — the agent could
+    // read all of $HOME and never knew which folder it was "in".
     // Worktree isolation is off by default — usecases are not always git repos.
-    backend: new FilesystemBackend({ rootDir: opts.cwd }),
+    backend: new FilesystemBackend({ rootDir: opts.cwd, virtualMode: true }),
   })
 }
