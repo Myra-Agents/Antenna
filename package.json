@@ -1,6 +1,6 @@
 {
   "name": "@myra/harness",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "module": "src/index.ts",
@@ -9,7 +9,7 @@
     "smoke": "bun run src/index.ts smoke",
     "dev": "bun run src/index.ts",
     "typecheck": "tsc --noEmit",
-    "compile": "bun build --compile --minify --target bun-darwin-arm64 --outfile dist/myra-harness src/index.ts"
+    "compile": "bun scripts/compile.mjs"
   },
   "dependencies": {
     "@langchain/openai": "1.5.3",
